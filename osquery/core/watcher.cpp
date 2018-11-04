@@ -8,6 +8,7 @@
  *  You may select, at your option, one of the above-listed licenses.
  */
 
+#include <chrono>
 #include <cstring>
 
 #include <math.h>
@@ -96,7 +97,7 @@ HIDDEN_FLAG(uint64,
 CLI_FLAG(bool,
          enable_extensions_watchdog,
          false,
-         "Disable userland watchdog for extensions processes");
+         "Enable userland watchdog for extensions processes");
 
 CLI_FLAG(bool, disable_watchdog, false, "Disable userland watchdog process");
 
@@ -247,7 +248,7 @@ void WatcherRunner::start() {
       // A test harness can end the thread immediately.
       break;
     }
-    pauseMilli(getWorkerLimit(WatchdogLimitType::INTERVAL) * 1000);
+    pause(std::chrono::seconds(getWorkerLimit(WatchdogLimitType::INTERVAL)));
   } while (!interrupted() && ok());
 }
 
@@ -287,7 +288,8 @@ void WatcherRunner::watchExtensions() {
         systemLog(error.str());
         LOG(WARNING) << error.str();
         stopChild(*extension.second);
-        pauseMilli(getWorkerLimit(WatchdogLimitType::INTERVAL) * 1000);
+        pause(
+            std::chrono::seconds(getWorkerLimit(WatchdogLimitType::INTERVAL)));
       }
 
       // The extension manager also watches for extension-related failures.
@@ -530,7 +532,7 @@ void WatcherRunner::createWorker() {
       // Exponential back off for quickly-respawning clients.
       delay += static_cast<size_t>(pow(2, watcher.workerRestartCount()));
       delay = std::min(static_cast<size_t>(FLAGS_watchdog_max_delay), delay);
-      pauseMilli(delay * 1000);
+      pause(std::chrono::seconds(delay));
     }
   }
 
@@ -638,7 +640,7 @@ void WatcherWatcherRunner::start() {
       Initializer::requestShutdown();
       break;
     }
-    pauseMilli(getWorkerLimit(WatchdogLimitType::INTERVAL) * 1000);
+    pause(std::chrono::seconds(getWorkerLimit(WatchdogLimitType::INTERVAL)));
   }
 }
 

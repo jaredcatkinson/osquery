@@ -24,15 +24,6 @@ DECLARE_bool(utc);
 
 class ConversionsTests : public testing::Test {};
 
-TEST_F(ConversionsTests, test_base64) {
-  std::string unencoded = "HELLO";
-  auto encoded = base64Encode(unencoded);
-  EXPECT_NE(encoded.size(), 0U);
-
-  auto unencoded2 = base64Decode(encoded);
-  EXPECT_EQ(unencoded, unencoded2);
-}
-
 TEST_F(ConversionsTests, test_ascii_true) {
   std::string unencoded = "HELLO";
   auto result = isPrintable(unencoded);
@@ -82,12 +73,6 @@ TEST_F(ConversionsTests, test_split_occurences) {
       "T", "'S:S'",
   };
   EXPECT_EQ(split(content, ':', 1), expected);
-}
-
-TEST_F(ConversionsTests, test_buffer_sha1) {
-  std::string test = "test\n";
-  EXPECT_EQ("4e1243bd22c66e76c2ba9eddc1f91394e57f9f83",
-            getBufferSHA1(test.c_str(), test.size()));
 }
 
 TEST_F(ConversionsTests, test_json_array) {
@@ -602,4 +587,19 @@ TEST_F(ConversionsTests, tryTo_string_to_boolean_invalid_args) {
     EXPECT_EQ(ConversionError::InvalidArgument, exp.getErrorCode());
   }
 }
+
+#ifdef DARWIN
+TEST_F(ConversionsTests, stringFromCFString) {
+  auto const in_str = std::string{u8"空間"};
+  auto const cf_string_ref =
+      CFStringCreateWithBytes(kCFAllocatorDefault,
+                              reinterpret_cast<const UInt8*>(in_str.data()),
+                              in_str.size(),
+                              kCFStringEncodingUTF8,
+                              false);
+  auto out_str = stringFromCFString(cf_string_ref);
+  EXPECT_EQ(in_str, out_str);
+}
+#endif
+
 } // namespace osquery

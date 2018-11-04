@@ -8,16 +8,20 @@
  *  You may select, at your option, one of the above-listed licenses.
  */
 
+#include <algorithm>
 #include <ctime>
 
 #include <boost/format.hpp>
+#include <boost/io/detail/quoted_manip.hpp>
 
 #include <osquery/config.h>
 #include <osquery/core.h>
 #include <osquery/database.h>
 #include <osquery/flags.h>
+#include <osquery/killswitch.h>
 #include <osquery/logger.h>
 #include <osquery/numeric_monitoring.h>
+#include <osquery/profiler/profiler.h>
 #include <osquery/query.h>
 #include <osquery/system.h>
 
@@ -91,8 +95,7 @@ SQLInternal monitor(const std::string& name, const ScheduledQuery& query) {
   return sql;
 }
 
-inline Status launchQuery(const std::string& name,
-                          const ScheduledQuery& query) {
+Status launchQuery(const std::string& name, const ScheduledQuery& query) {
   // Execute the scheduled query and create a named query object.
   LOG(INFO) << "Executing scheduled query " << name << ": " << query.query;
   runDecorators(DECORATE_ALWAYS);
@@ -139,8 +142,8 @@ inline Status launchQuery(const std::string& name,
     status = dbQuery.addNewResults(
         std::move(sql.rows()), item.epoch, item.counter, diff_results);
     if (!status.ok()) {
-      std::string line =
-          "Error adding new results to database: " + status.what();
+      std::string line = "Error adding new results to database for query " +
+                         name + ": " + status.what();
       LOG(ERROR) << line;
 
       // If the database is not available then the daemon cannot continue.
@@ -172,19 +175,6 @@ inline Status launchQuery(const std::string& name,
   return status;
 }
 
-inline void launchQueryWithProfiling(const std::string& name,
-                                     const ScheduledQuery& query) {
-  auto start_time_point = std::chrono::steady_clock::now();
-  auto status = launchQuery(name, query);
-  auto query_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - start_time_point);
-  auto monitoring_path = boost::format("scheduler.executing_query.%s.%s") %
-                         name % (status.ok() ? "success" : "failure");
-  monitoring::record(monitoring_path.str(),
-                     query_duration.count(),
-                     monitoring::PreAggregationType::Min);
-}
-
 void SchedulerRunner::start() {
   // Start the counter at the second.
   auto i = osquery::getUnixTime();
@@ -195,7 +185,12 @@ void SchedulerRunner::start() {
           if (query.splayed_interval > 0 && i % query.splayed_interval == 0) {
             TablePlugin::kCacheInterval = query.splayed_interval;
             TablePlugin::kCacheStep = i;
-            launchQueryWithProfiling(name, query);
+            {
+              CodeProfiler codeProfiler(
+                  (boost::format("scheduler.executing_query.%s") % name).str());
+              const auto status = launchQuery(name, query);
+              codeProfiler.appendName(status.ok() ? ".success" : ".failure");
+            };
           }
         }));
     // Configuration decorators run on 60 second intervals only.
@@ -217,7 +212,8 @@ void SchedulerRunner::start() {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start_time_point);
     if (loop_step_duration + time_drift_ < interval_) {
-      pauseMilli(interval_ - loop_step_duration - time_drift_);
+      pause(std::chrono::milliseconds(interval_ - loop_step_duration -
+                                      time_drift_));
       time_drift_ = std::chrono::milliseconds::zero();
     } else {
       time_drift_ += loop_step_duration - interval_;

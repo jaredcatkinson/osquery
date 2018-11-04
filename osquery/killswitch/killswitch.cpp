@@ -17,11 +17,11 @@
 
 namespace osquery {
 
-const char Killswitch::killswitch_[] = "killswitch";
-const char Killswitch::action_[] = "action";
-const char Killswitch::isEnabled_[] = "isEnabled";
-const char Killswitch::key_[] = "key";
-const char Killswitch::refresh_[] = "refresh";
+const char* Killswitch::killswitch_ = "killswitch";
+const char* Killswitch::action_ = "action";
+const char* Killswitch::isEnabled_ = "isEnabled";
+const char* Killswitch::key_ = "key";
+const char* Killswitch::refresh_ = "refresh";
 
 FLAG(bool, enable_killswitch, false, "Enable killswitch plugin");
 FLAG(string,
@@ -32,16 +32,25 @@ FLAG(string,
 Killswitch::Killswitch() {}
 Killswitch::~Killswitch() = default;
 
-/**
- * It's always recommended to use the same skeleton,
- * while implementing the new killswitch.
- * Only changing isNewCodeEnabled argument should be okay in most of the cases.
- * However, if a different implementation is necessary,
- * it's recommended to explicitly discuss it in the PR.
- */
-// bool Killswitch::isMyTutorialFeatureEnabled();{
-//   return isNewCodeEnabled("tutorialSwitch");
-// }
+bool Killswitch::isPosixProfilingEnabled() {
+  return isNewCodeEnabled("posixProfilingSwitch");
+}
+
+bool Killswitch::isTotalQueryCounterMonitorEnabled() {
+  return isNewCodeEnabled("totalQueryCounterMonitorSwitch");
+}
+
+bool Killswitch::isAppStartMonitorEnabled() {
+  return isNewCodeEnabled("appStartMonitorSwitch");
+}
+
+bool Killswitch::isWindowsProfilingEnabled() {
+  return isNewCodeEnabled("windowsProfilingSwitch");
+}
+
+bool Killswitch::isConfigBackupEnabled() {
+  return isNewCodeEnabled("configBackupSwitch");
+}
 
 bool Killswitch::isNewCodeEnabled(const std::string& key) {
   auto result = isEnabled(key);

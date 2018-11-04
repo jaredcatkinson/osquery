@@ -36,6 +36,7 @@ set(OSQUERY_TABLES_TESTS "")
 # Add all and extra for osquery code.
 if(CLANG AND POSIX)
   add_compile_options(
+    -Werror
     -Wall
     -Wextra
     -pedantic
@@ -86,6 +87,7 @@ add_library(libosquery STATIC main/lib.cpp)
 include(config/CMakeLists.txt)
 include(core/CMakeLists.txt)
 include(database/CMakeLists.txt)
+include(debug/CMakeLists.txt)
 include(devtools/CMakeLists.txt)
 include(dispatcher/CMakeLists.txt)
 include(distributed/CMakeLists.txt)
@@ -100,6 +102,7 @@ include(sql/CMakeLists.txt)
 include(remote/CMakeLists.txt)
 include(utils/CMakeLists.txt)
 include(numeric_monitoring/CMakeLists.txt)
+include(profiler/CMakeLists.txt)
 
 if(NOT SKIP_CARVER)
   include(carver/CMakeLists.txt)
@@ -166,10 +169,12 @@ endif()
 
 if(APPLE OR LINUX)
   ADD_OSQUERY_LINK_CORE("libdl")
+  ADD_OSQUERY_LINK_CORE("rocksdb_lite")
   ADD_OSQUERY_LINK_ADDITIONAL("rocksdb_lite")
 elseif(FREEBSD)
   ADD_OSQUERY_LINK_CORE("icuuc")
   ADD_OSQUERY_LINK_CORE("linenoise")
+  ADD_OSQUERY_LINK_CORE("rocksdb-lite")
   ADD_OSQUERY_LINK_ADDITIONAL("rocksdb-lite")
 endif()
 
@@ -469,6 +474,16 @@ if(NOT SKIP_TESTS)
     target_link_libraries(osquery_tables_tests gtest gmock libosquery_testing)
     SET_OSQUERY_COMPILE(osquery_tables_tests "${GTEST_FLAGS}")
     add_test(osquery_tables_tests osquery_tables_tests ${TEST_ARGS})
+
+    include(tests/integration/CMakeLists.txt)
+    add_executable(osquery_integration_tests main/tests.cpp $<TARGET_OBJECTS:osquery_tables_integration_tests>)
+    ADD_DEFAULT_LINKS(osquery_integration_tests TRUE)
+    target_link_libraries(osquery_integration_tests gtest gmock libosquery_testing)
+    SET_OSQUERY_COMPILE(osquery_integration_tests "${GTEST_FLAGS}")
+    add_test(NAME
+              osquery_integration_tests
+            COMMAND
+              osquery_tables_tests ${TEST_ARGS})
   endif()
 
   # Build the example extension with the SDK.

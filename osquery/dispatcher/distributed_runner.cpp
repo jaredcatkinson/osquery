@@ -8,6 +8,8 @@
  *  You may select, at your option, one of the above-listed licenses.
  */
 
+#include <chrono>
+
 #include <osquery/database.h>
 #include <osquery/distributed.h>
 #include <osquery/flags.h>
@@ -39,13 +41,13 @@ void DistributedRunner::start() {
     std::string str_acu = "0";
     Status database = getDatabaseValue(
         kPersistentSettings, "distributed_accelerate_checkins_expire", str_acu);
-    unsigned long accelerate_checkins_expire;
-    Status conversion = safeStrtoul(str_acu, 10, accelerate_checkins_expire);
-    if (!database.ok() || !conversion.ok() ||
-        getUnixTime() > accelerate_checkins_expire) {
-      pauseMilli(FLAGS_distributed_interval * 1000);
+    auto const accelerate_checkins_expire_exp =
+        tryTo<unsigned long int>(str_acu, 10);
+    if (!database.ok() || accelerate_checkins_expire_exp.isError() ||
+        getUnixTime() > accelerate_checkins_expire_exp.get()) {
+      pause(std::chrono::seconds(FLAGS_distributed_interval));
     } else {
-      pauseMilli(kDistributedAccelerationInterval * 1000);
+      pause(std::chrono::seconds(kDistributedAccelerationInterval));
     }
   }
 }

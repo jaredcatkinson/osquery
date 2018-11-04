@@ -62,31 +62,39 @@ void genInterfaceDetail(const IP_ADAPTER_ADDRESSES* adapter, Row& r) {
       "Name = \"" +
       r["description"] + "\"";
 
-  WmiRequest req1(query);
+  const WmiRequest req1(query);
   if (req1.getStatus().ok()) {
-    auto& results = req1.results();
+    const auto& results = req1.results();
     if (!results.empty()) {
       std::string sPlaceHolder;
 
       results[0].GetString("PacketsReceivedPerSec", sPlaceHolder);
-      r["ipackets"] = BIGINT(tryTo<unsigned long long>(sPlaceHolder).getOr(0));
+      r["ipackets"] =
+          BIGINT(tryTo<unsigned long long>(sPlaceHolder).takeOr(0ull));
       results[0].GetString("PacketsSentPerSec", sPlaceHolder);
-      r["opackets"] = BIGINT(tryTo<unsigned long long>(sPlaceHolder).getOr(0));
+      r["opackets"] =
+          BIGINT(tryTo<unsigned long long>(sPlaceHolder).takeOr(0ull));
 
       results[0].GetString("BytesReceivedPerSec", sPlaceHolder);
-      r["ibytes"] = BIGINT(tryTo<unsigned long long>(sPlaceHolder).getOr(0));
+      r["ibytes"] =
+          BIGINT(tryTo<unsigned long long>(sPlaceHolder).takeOr(0ull));
       results[0].GetString("BytesSentPerSec", sPlaceHolder);
-      r["obytes"] = BIGINT(tryTo<unsigned long long>(sPlaceHolder).getOr(0));
+      r["obytes"] =
+          BIGINT(tryTo<unsigned long long>(sPlaceHolder).takeOr(0ull));
 
       results[0].GetString("PacketsReceivedErrors", sPlaceHolder);
-      r["ierrors"] = BIGINT(tryTo<unsigned long long>(sPlaceHolder).getOr(0));
+      r["ierrors"] =
+          BIGINT(tryTo<unsigned long long>(sPlaceHolder).takeOr(0ull));
       results[0].GetString("PacketsOutboundErrors", sPlaceHolder);
-      r["oerrors"] = BIGINT(tryTo<unsigned long long>(sPlaceHolder).getOr(0));
+      r["oerrors"] =
+          BIGINT(tryTo<unsigned long long>(sPlaceHolder).takeOr(0ull));
 
       results[0].GetString("PacketsReceivedDiscarded", sPlaceHolder);
-      r["idrops"] = BIGINT(tryTo<unsigned long long>(sPlaceHolder).getOr(0));
+      r["idrops"] =
+          BIGINT(tryTo<unsigned long long>(sPlaceHolder).takeOr(0ull));
       results[0].GetString("PacketsOutboundDiscarded", sPlaceHolder);
-      r["odrops"] = BIGINT(tryTo<unsigned long long>(sPlaceHolder).getOr(0));
+      r["odrops"] =
+          BIGINT(tryTo<unsigned long long>(sPlaceHolder).takeOr(0ull));
     } else {
       LOG(INFO) << "Failed to retrieve network statistics for interface "
                 << r["interface"];
@@ -97,9 +105,9 @@ void genInterfaceDetail(const IP_ADAPTER_ADDRESSES* adapter, Row& r) {
       "SELECT * FROM Win32_NetworkAdapter WHERE "
       "InterfaceIndex = " +
       r["interface"];
-  WmiRequest req2(query);
+  const WmiRequest req2(query);
   if (req2.getStatus().ok()) {
-    auto& results = req2.results();
+    const auto& results = req2.results();
     if (!results.empty()) {
       bool bPlaceHolder;
       long lPlaceHolder = 0;
@@ -125,11 +133,11 @@ void genInterfaceDetail(const IP_ADAPTER_ADDRESSES* adapter, Row& r) {
       "SELECT * FROM win32_networkadapterconfiguration WHERE "
       "InterfaceIndex = " +
       r["interface"];
-  WmiRequest req3(query);
+  const WmiRequest req3(query);
   if (req3.getStatus().ok()) {
-    auto& results = req3.results();
+    const auto& results = req3.results();
     if (!results.empty()) {
-      bool bPlaceHolder;
+      bool bPlaceHolder = false;
       std::vector<std::string> vPlaceHolder;
       results[0].GetBool("DHCPEnabled", bPlaceHolder);
       r["dhcp_enabled"] = INTEGER(bPlaceHolder);
@@ -267,9 +275,7 @@ QueryData genInterfaceAddresses(QueryContext& context) {
 
   const IP_ADAPTER_ADDRESSES* currAdapter = adapters.get();
   while (currAdapter != nullptr) {
-    std::wstring wsAdapterName = std::wstring(currAdapter->FriendlyName);
-    auto adapterName = std::string(wsAdapterName.begin(), wsAdapterName.end());
-
+    auto adapterName = wstringToString(currAdapter->FriendlyName);
     const IP_ADAPTER_UNICAST_ADDRESS* ipaddr = currAdapter->FirstUnicastAddress;
     while (ipaddr != nullptr) {
       Row r;

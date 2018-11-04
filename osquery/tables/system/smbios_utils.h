@@ -52,6 +52,7 @@ extern const std::map<uint8_t, std::string> kSMBIOSTypeDescriptions;
 
 constexpr uint8_t kSMBIOSTypeBIOS = 0;
 constexpr uint8_t kSMBIOSTypeSystem = 1;
+constexpr uint8_t kSMBIOSTypeOEMStrings = 11;
 constexpr uint8_t kSMBIOSTypeMemoryArray = 16;
 constexpr uint8_t kSMBIOSTypeMemoryDevice = 17;
 constexpr uint8_t kSMBIOSTypeMemoryErrorInformation = 18;
@@ -128,19 +129,26 @@ void genSMBIOSMemoryDeviceMappedAddresses(size_t index,
                                           size_t size,
                                           QueryData& results);
 
+/// Helper, cross platform, table generator for OEM strings.
+void genSMBIOSOEMStrings(const SMBStructHeader* hdr,
+                         uint8_t* address,
+                         uint8_t* textAddrs,
+                         size_t size,
+                         QueryData& results);
+
 /**
  * @brief Return a 0-terminated strings from an SMBIOS address and handle.
  *
  * SMBIOS strings are 0-terminated and 'stacked' at the end of the type
  * structure. Each structure identifies (loosely) the type of data within.
- * Using the structure field 'handle' or offset, the stacked data can be parsed
- * and a string returned.
+ * Using the structure location for where the strings start and the index of
+ * target string, the stacked data can be parsed and a string returned.
  *
- * @param data A pointer to the SMBIOS structure.
- * @param address A pointer to the stacked data following the structure.
- * @Param offset The field index into address.
+ * @param data A pointer to the stacked data suffixing the SMBIOS structure.
+ * @param index The index of the stacked string.
+ * @param maxlen The size of the text region.
  */
-std::string dmiString(uint8_t* data, uint8_t* address, size_t offset);
+std::string dmiString(uint8_t* data, uint8_t index, size_t maxlen);
 
 /**
  * @brief Return std::string representation of a bitfield.

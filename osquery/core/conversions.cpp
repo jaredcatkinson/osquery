@@ -12,30 +12,16 @@
 #include <locale>
 #include <unordered_map>
 
-#include <boost/archive/iterators/base64_from_binary.hpp>
-#include <boost/archive/iterators/binary_from_base64.hpp>
-#include <boost/archive/iterators/transform_width.hpp>
 #include <boost/io/detail/quoted_manip.hpp>
-#if (BOOST_VERSION >= 106600)
-#include <boost/uuid/detail/sha1.hpp>
-#else
-#include <boost/uuid/sha1.hpp>
-#endif
 
 #include <osquery/logger.h>
 
 #include "osquery/core/conversions.h"
 #include "osquery/core/json.h"
 
-namespace bai = boost::archive::iterators;
 namespace rj = rapidjson;
 
 namespace osquery {
-
-typedef bai::binary_from_base64<const char*> base64_str;
-typedef bai::transform_width<base64_str, 8, 6> base64_dec;
-typedef bai::transform_width<std::string::const_iterator, 6, 8> base64_enc;
-typedef bai::base64_from_binary<base64_enc> it_base64;
 
 JSON::JSON(rj::Type type) : type_(type) {
   if (type_ == rj::kObjectType) {
@@ -295,7 +281,7 @@ const rj::Document& JSON::doc() const {
 
 size_t JSON::valueToSize(const rj::Value& value) {
   if (value.IsString()) {
-    return tryTo<std::size_t>(std::string{value.GetString()}).getOr(0_sz);
+    return tryTo<std::size_t>(std::string{value.GetString()}).takeOr(0_sz);
   } else if (value.IsNumber()) {
     return static_cast<size_t>(value.GetUint64());
   }
@@ -314,41 +300,6 @@ bool JSON::valueToBool(const rj::Value& value) {
     return (value.GetInt() != 0);
   }
   return false;
-}
-
-std::string base64Decode(std::string encoded) {
-  boost::erase_all(encoded, "\r\n");
-  boost::erase_all(encoded, "\n");
-  boost::trim_right_if(encoded, boost::is_any_of("="));
-
-  if (encoded.empty()) {
-    return encoded;
-  }
-
-  try {
-    return std::string(base64_dec(encoded.data()),
-                       base64_dec(encoded.data() + encoded.size()));
-  } catch (const boost::archive::iterators::dataflow_exception& e) {
-    LOG(INFO) << "Could not base64 decode string: " << e.what();
-    return "";
-  }
-}
-
-std::string base64Encode(const std::string& unencoded) {
-  if (unencoded.empty()) {
-    return unencoded;
-  }
-
-  size_t writePaddChars = (3U - unencoded.length() % 3U) % 3U;
-  try {
-    auto encoded =
-        std::string(it_base64(unencoded.begin()), it_base64(unencoded.end()));
-    encoded.append(std::string(writePaddChars, '='));
-    return encoded;
-  } catch (const boost::archive::iterators::dataflow_exception& e) {
-    LOG(INFO) << "Could not base64 decode string: " << e.what();
-    return "";
-  }
 }
 
 bool isPrintable(const std::string& check) {
@@ -395,22 +346,6 @@ std::vector<std::string> split(const std::string& s,
     elems.push_back(boost::algorithm::join(accumulator, delims));
   }
   return elems;
-}
-
-std::string getBufferSHA1(const char* buffer, size_t size) {
-  // SHA1 produces 160-bit digests, so allocate (5 * 32) bits.
-  uint32_t digest[5] = {0};
-  boost::uuids::detail::sha1 sha1;
-  sha1.process_bytes(buffer, size);
-  sha1.get_digest(digest);
-
-  // Convert digest to desired hex string representation.
-  std::stringstream result;
-  result << std::hex << std::setfill('0');
-  for (size_t i = 0; i < 5; ++i) {
-    result << std::setw(sizeof(uint32_t) * 2) << digest[i];
-  }
-  return result.str();
 }
 
 size_t operator"" _sz(unsigned long long int x) {

@@ -27,10 +27,10 @@ namespace fs = boost::filesystem;
 namespace osquery {
 
 /// Hidden flags created for internal stress testing.
-HIDDEN_FLAG(int32, rocksdb_write_buffer, 16, "Max write buffer number");
-HIDDEN_FLAG(int32, rocksdb_merge_number, 4, "Min write buffer number to merge");
-HIDDEN_FLAG(int32, rocksdb_background_flushes, 4, "Max background flushes");
-HIDDEN_FLAG(uint64, rocksdb_buffer_blocks, 256, "Write buffer blocks (4k)");
+DECLARE_int32(rocksdb_write_buffer);
+DECLARE_int32(rocksdb_merge_number);
+DECLARE_int32(rocksdb_background_flushes);
+DECLARE_uint64(rocksdb_buffer_blocks);
 
 DECLARE_string(database_path);
 
@@ -164,7 +164,7 @@ Status RocksDBDatabasePlugin::setUp() {
   }
 
   // RocksDB may not create/append a directory with acceptable permissions.
-  if (!read_only_ && platformChmod(path_, S_IRWXU) == false) {
+  if (!read_only_ && platformSetSafeDbPerms(path_) == false) {
     return Status(1, "Cannot set permissions on RocksDB path: " + path_);
   }
   return Status(0);

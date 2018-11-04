@@ -9,7 +9,7 @@ The tools make low-level operating system analytics and monitoring both performa
 
 | Platform | Build status  | | | |
 |----------|---------------|---|---|---|
-macOS 10.12    | [![Build Status](https://jenkins.osquery.io/job/osqueryMasterBuildOSX10.12/badge/icon)](https://jenkins.osquery.io/job/osqueryMasterBuildOSX10.12/) | | **Homepage:** | https://osquery.io
+MacOS 10.13    | [![Build Status](https://jenkins.osquery.io/job/osqueryMasterBuildMacOS/badge/icon)](https://jenkins.osquery.io/job/osqueryMasterBuildMacOS/) | | **Homepage:** | https://osquery.io
 CentOS 6.x | [![Build Status](https://jenkins.osquery.io/job/osqueryMasterBuildCentOS6/badge/icon)](https://jenkins.osquery.io/job/osqueryMasterBuildCentOS6/) | | **Downloads:** | https://osquery.io/downloads
 CentOS 7.x   | [![Build Status](https://jenkins.osquery.io/job/osqueryMasterBuildCentOS7/badge/icon)](https://jenkins.osquery.io/job/osqueryMasterBuildCentOS7/) | | **Tables:** | https://osquery.io/schema
 Ubuntu 14.04   | [![Build Status](https://jenkins.osquery.io/job/osqueryMasterBuildUbuntu14/badge/icon)](https://jenkins.osquery.io/job/osqueryMasterBuildUbuntu14/) | | **Packs:** | [https://osquery.io/packs](https://github.com/facebook/osquery/tree/master/packs)
@@ -78,7 +78,7 @@ These queries can be:
 For latest stable builds for OS X (pkg) and Linux (deb/rpm), as well as yum and apt repository information visit [https://osquery.io/downloads](https://osquery.io/downloads/). Windows 10, 8, Server 2012 and 2016 packages are published to [Chocolatey](https://chocolatey.org/packages/osquery).
 
 The list of supported platforms for **running** osquery is massive:
-- Apple OS X 10.10, 10.11, and macOS 10.12
+- Apple OS X 10.10, 10.11, and macOS 10.12, 10.13
 - Any 64bit Linux OS with `glibc >= 2.13` and `zlib >= 1.2`
 - Windows 10, 8, Server 2012, and 2016
 
@@ -88,7 +88,7 @@ Building osquery from source is encouraged! [Check out the documentation](https:
 
 We *officially* support a subset of OS versions for **building** because it is rather intense.
 - Ubuntu 14.04 and 16.04, CentOS 6.5 and 7
-- Apple macOS 10.12
+- Apple macOS 10.13
 - Windows 10 and Server 2016
 
 ## File Integrity Monitoring (FIM)
@@ -103,7 +103,7 @@ There are several forms of [eventing](http://osquery.readthedocs.org/en/stable/d
 
 ## License
 
-The osquery project is dual-licensed under Apache 2.0 and GPLv2. You may select, at your option, one of these licenses.
+By contributing to osquery you agree that your contributions will be licensed as defined on the LICENSE file.
 
 ## Vulnerabilities
 
@@ -113,7 +113,5 @@ Facebook has a [bug bounty](https://www.facebook.com/whitehat/) program that inc
 
 ## Learn more
 
-**Want to be a Security Engineer at Facebook?** The osquery development team is hiring! Our team's mission is detect external and internal threats to users' data. We do that by building, deploying, and using intrusion detection tools like osquery. Check out our [position description](https://www.facebook.com/careers/jobs/a0I1200000JXmWQEA1/) or reach out to [`@theopolis`](https://github.com/theopolis).
-
 Read the [launch blog post](https://code.facebook.com/posts/844436395567983/introducing-osquery/) for background on the project.
-If you're interested in learning more about osquery, visit the [users guide](https://osquery.readthedocs.org/) and browse our RFC-labeled Github issues. Development and usage discussion is happing in the osquery Slack, grab an invite automatically: [https://osquery-slack.herokuapp.com/](https://osquery-slack.herokuapp.com/)!
+If you're interested in learning more about osquery, visit the [users guide](https://osquery.readthedocs.org/). Development and usage discussion is happening in the osquery Slack, grab an invite automatically [here](https://slack.osquery.io)!

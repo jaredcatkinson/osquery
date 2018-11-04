@@ -284,19 +284,15 @@ static void plan(const std::string& output) {
 }
 
 int xOpen(sqlite3_vtab* tab, sqlite3_vtab_cursor** ppCursor) {
-  int rc = SQLITE_NOMEM;
   auto* pCur = new BaseCursor;
   auto* pVtab = (VirtualTable*)tab;
-  if (pCur != nullptr) {
-    plan("Opening cursor (" + std::to_string(kPlannerCursorID) +
-         ") for table: " + pVtab->content->name);
-    pCur->id = kPlannerCursorID++;
-    pCur->base.pVtab = tab;
-    *ppCursor = (sqlite3_vtab_cursor*)pCur;
-    rc = SQLITE_OK;
-  }
+  plan("Opening cursor (" + std::to_string(kPlannerCursorID) +
+       ") for table: " + pVtab->content->name);
+  pCur->id = kPlannerCursorID++;
+  pCur->base.pVtab = tab;
+  *ppCursor = (sqlite3_vtab_cursor*)pCur;
 
-  return rc;
+  return SQLITE_OK;
 }
 
 int xClose(sqlite3_vtab_cursor* cur) {
@@ -360,11 +356,12 @@ int xRowid(sqlite3_vtab_cursor* cur, sqlite_int64* pRowid) {
   if (rowid_it != current_row.end()) {
     const auto& rowid_text_field = rowid_it->second;
 
-    auto status = safeStrtoll(rowid_text_field, 10, *pRowid);
-    if (!status.ok()) {
-      VLOG(1) << "Invalid rowid value returned";
+    auto exp = tryTo<long long>(rowid_text_field, 10);
+    if (exp.isError()) {
+      VLOG(1) << "Invalid rowid value returned " << exp.getError();
       return SQLITE_ERROR;
     }
+    *pRowid = exp.take();
 
   } else {
     *pRowid = pCur->row;
@@ -539,11 +536,12 @@ int xUpdate(sqlite3_vtab* p,
       rowid = id_it->second;
     }
 
-    auto status = safeStrtoll(rowid, 10, *pRowid);
-    if (!status.ok()) {
+    auto exp = tryTo<long long>(rowid);
+    if (exp.isError()) {
       VLOG(1) << "The plugin did not return a valid row id";
       return SQLITE_ERROR;
     }
+    *pRowid = exp.take();
   }
 
   return SQLITE_OK;
@@ -556,7 +554,7 @@ int xCreate(sqlite3* db,
             sqlite3_vtab** ppVtab,
             char** pzErr) {
   auto* pVtab = new VirtualTable;
-  if (!pVtab || argc == 0 || argv[0] == nullptr) {
+  if (argc == 0 || argv[0] == nullptr) {
     delete pVtab;
     return SQLITE_NOMEM;
   }
@@ -713,27 +711,26 @@ int xColumn(sqlite3_vtab_cursor* cur, sqlite3_context* ctx, int col) {
     // Missing content.
     VLOG(1) << "Error " << column_name << " is empty";
     sqlite3_result_null(ctx);
-  } else if (type == TEXT_TYPE) {
+  } else if (type == TEXT_TYPE || type == BLOB_TYPE) {
     sqlite3_result_text(
         ctx, value.c_str(), static_cast<int>(value.size()), SQLITE_STATIC);
   } else if (type == INTEGER_TYPE) {
-    long afinite;
-    if (!safeStrtol(value, 0, afinite) || afinite < INT_MIN ||
-        afinite > INT_MAX) {
+    auto afinite = tryTo<long>(value, 0);
+    if (afinite.isError()) {
       VLOG(1) << "Error casting " << column_name << " (" << value
               << ") to INTEGER";
       sqlite3_result_null(ctx);
     } else {
-      sqlite3_result_int(ctx, (int)afinite);
+      sqlite3_result_int(ctx, afinite.take());
     }
   } else if (type == BIGINT_TYPE || type == UNSIGNED_BIGINT_TYPE) {
-    long long afinite;
-    if (!safeStrtoll(value, 0, afinite)) {
+    auto afinite = tryTo<long long>(value, 0);
+    if (afinite.isError()) {
       VLOG(1) << "Error casting " << column_name << " (" << value
               << ") to BIGINT";
       sqlite3_result_null(ctx);
     } else {
-      sqlite3_result_int64(ctx, afinite);
+      sqlite3_result_int64(ctx, afinite.take());
     }
   } else if (type == DOUBLE_TYPE) {
     char* end = nullptr;

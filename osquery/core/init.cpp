@@ -210,12 +210,30 @@ static std::thread::id kMainThreadId;
 unsigned long kLegacyThreadId;
 
 /// When no flagfile is provided via CLI, attempt to read flag 'defaults'.
-const std::string kBackupDefaultFlagfile{OSQUERY_HOME "/osquery.flags.default"};
+const std::string kBackupDefaultFlagfile{OSQUERY_HOME "osquery.flags.default"};
 
 const size_t kDatabaseMaxRetryCount{25};
 const size_t kDatabaseRetryDelay{200};
 std::function<void()> Initializer::shutdown_{nullptr};
 RecursiveMutex Initializer::shutdown_mutex_;
+
+namespace {
+
+void initWorkDirectories() {
+  if (!FLAGS_disable_database) {
+    auto const recursive = true;
+    auto const ignore_existence = true;
+    auto const status = createDirectory(
+        boost::filesystem::path(FLAGS_database_path).parent_path(),
+        recursive,
+        ignore_existence);
+    if (!status.ok()) {
+      LOG(ERROR) << "Could not initialize db directory " << status.what();
+    }
+  }
+}
+
+} // namespace
 
 static inline void printUsage(const std::string& binary, ToolType tool) {
   // Parse help options before gflags. Only display osquery-related options.
@@ -286,18 +304,6 @@ Initializer::Initializer(int& argc, char**& argv, ToolType tool)
     }
   }
 #endif
-
-  // Handled boost filesystem locale problems fixes in 1.56.
-  // See issue #1559 for the discussion and upstream boost patch.
-  try {
-    boost::filesystem::path::codecvt();
-  } catch (const std::runtime_error& /* e */) {
-#ifdef WIN32
-    setlocale(LC_ALL, "C");
-#else
-    setenv("LC_ALL", "C", 1);
-#endif
-  }
 
   Flag::create("logtostderr",
                {"Log messages to stderr in addition to the logger plugin(s)",
@@ -373,6 +379,9 @@ Initializer::Initializer(int& argc, char**& argv, ToolType tool)
     // Initialize the shell after setting modified defaults and parsing flags.
     initShell();
   }
+  if (isDaemon()) {
+    initWorkDirectories();
+  }
 
   std::signal(SIGABRT, signalHandler);
   std::signal(SIGUSR1, signalHandler);
@@ -390,6 +399,11 @@ Initializer::Initializer(int& argc, char**& argv, ToolType tool)
   // If the caller is checking configuration, disable the watchdog/worker.
   if (FLAGS_config_check) {
     FLAGS_disable_watchdog = true;
+  }
+
+  if (isWatcher()) {
+    FLAGS_disable_database = true;
+    FLAGS_disable_logging = true;
   }
 
   // Initialize the status and results logger.
@@ -448,6 +462,7 @@ void Initializer::initDaemon() const {
   // Nice ourselves if using a watchdog and the level is not too permissive.
   if (!FLAGS_disable_watchdog && FLAGS_watchdog_level >= 0) {
     // Set CPU scheduling I/O limits.
+    // On windows these values are inherited so no further calls are needed.
     setToBackgroundPriority();
 
 #ifdef __linux__
@@ -485,8 +500,6 @@ void Initializer::initShell() const {
 void Initializer::initWatcher() const {
   // The watcher should not log into or use a persistent database.
   if (isWatcher()) {
-    FLAGS_disable_database = true;
-    FLAGS_disable_logging = true;
     DatabasePlugin::setAllowOpen(true);
     DatabasePlugin::initPlugin();
   }
@@ -679,8 +692,8 @@ void Initializer::start() const {
   // Initialize the status and result plugin logger.
   if (!FLAGS_disable_logging) {
     initActivePlugin("logger", FLAGS_logger_plugin);
+    initLogger(binary_);
   }
-  initLogger(binary_);
 
   // Initialize the distributed plugin, if necessary
   if (!FLAGS_disable_distributed) {
@@ -693,6 +706,10 @@ void Initializer::start() const {
   if (FLAGS_enable_numeric_monitoring) {
     initActivePlugin(monitoring::registryName(),
                      FLAGS_numeric_monitoring_plugins);
+  }
+
+  if (Killswitch::get().isAppStartMonitorEnabled()) {
+    monitoring::record("osquery.start", 1, monitoring::PreAggregationType::Sum);
   }
 
   // Start event threads.

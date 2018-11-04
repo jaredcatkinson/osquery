@@ -22,15 +22,16 @@ FLAG(uint32,
      10,
      "Refresh rate of killswitch in seconds");
 
+namespace {
 class KillswitchRefresher : public InternalRunnable {
  public:
-  KillswitchRefresher(std::chrono::seconds update_interval)
+  explicit KillswitchRefresher(std::chrono::seconds update_interval)
       : InternalRunnable("KillswitchRefreshRunner"),
         update_interval_(update_interval) {}
   /// A simple wait/interruptible lock.
   void start() override {
     while (!interrupted()) {
-      pauseMilli(std::chrono::milliseconds(update_interval_));
+      pause(std::chrono::milliseconds(update_interval_));
       osquery::Killswitch::get().refresh();
     }
   }
@@ -38,6 +39,7 @@ class KillswitchRefresher : public InternalRunnable {
  private:
   const std::chrono::seconds update_interval_;
 };
+} // namespace
 
 Status KillswitchRefreshablePlugin::setUp() {
   if (FLAGS_killswitch_refresh_rate > 0) {

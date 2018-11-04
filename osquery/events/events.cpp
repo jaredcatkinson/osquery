@@ -52,11 +52,7 @@ FLAG(uint64, events_max, 50000, "Maximum number of events per type to buffer");
 
 static inline EventTime timeFromRecord(const std::string& record) {
   // Convert a stored index "as string bytes" to a time value.
-  long long afinite;
-  if (!safeStrtoll(record, 10, afinite)) {
-    return 0;
-  }
-  return afinite;
+  return static_cast<EventTime>(tryTo<long long>(record).takeOr(0ll));
 }
 
 static inline std::string toIndex(size_t i) {
@@ -82,17 +78,13 @@ static inline void getOptimizeData(EventTime& o_time,
   {
     std::string content;
     getDatabaseValue(kEvents, "optimize." + query_name, content);
-    long long optimize_time = 0;
-    safeStrtoll(content, 10, optimize_time);
-    o_time = static_cast<EventTime>(optimize_time);
+    o_time = timeFromRecord(content);
   }
 
   {
     std::string content;
     getDatabaseValue(kEvents, "optimize_eid." + query_name, content);
-    long long optimize_eid = 0;
-    safeStrtoll(content, 10, optimize_eid);
-    o_eid = static_cast<size_t>(optimize_eid);
+    o_eid = tryTo<std::size_t>(content).takeOr(std::size_t{0});
   }
 }
 
@@ -335,8 +327,9 @@ void EventSubscriberPlugin::expireCheck() {
     unsigned long min_key_value = 0;
     unsigned long max_key_value = 0;
     for (const auto& key : keys) {
-      unsigned long key_value = 0;
-      safeStrtoul(key.substr(key.rfind('.') + 1), 10, key_value);
+      auto const key_value =
+          tryTo<unsigned long int>(key.substr(key.rfind('.') + 1), 10)
+              .takeOr(0ul);
 
       if (key_value < static_cast<unsigned long>(threshold_key)) {
         min_key_value = (min_key_value == 0 || key_value < min_key_value)
@@ -437,10 +430,7 @@ Status EventSubscriberPlugin::recordEvents(
   WriteLock lock(event_record_lock_);
 
   DatabaseStringValueList database_data;
-  database_data.reserve(event_id_list.size());
-
-  std::string index_key = "indexes." + dbNamespace() + ".60";
-  std::string record_key = "records." + dbNamespace() + ".60.";
+  database_data.reserve(2U);
 
   // The list key includes the list type (bin size) and the list ID (bin).
   // The list_id is the MOST-Specific key ID, the bin for this list.
@@ -448,13 +438,15 @@ Status EventSubscriberPlugin::recordEvents(
   auto list_id = boost::lexical_cast<std::string>(event_time / 60);
   std::string time_value = boost::lexical_cast<std::string>(event_time);
 
-  for (const auto& eid : event_id_list) {
-    // The record is identified by the event type then module name.
-    // Append the record (eid, unix_time) to the list bin.
-    std::string record_value;
-    auto database_key = record_key + list_id;
-    getDatabaseValue(kEvents, database_key, record_value);
+  // The record is identified by the event type then module name.
+  // Append the record (eid, unix_time) to the list bin.
+  auto database_key = "records." + dbNamespace() + ".60." + list_id;
+  auto index_key = "indexes." + dbNamespace() + ".60";
 
+  std::string record_value;
+  getDatabaseValue(kEvents, database_key, record_value);
+
+  for (const auto& eid : event_id_list) {
     if (record_value.length() == 0) {
       // This is a new list_id for list_key, append the ID to the indirect
       // lookup for this list_key.
@@ -472,9 +464,9 @@ Status EventSubscriberPlugin::recordEvents(
       // Tokenize a record using ',' and the EID/time using ':'.
       record_value += "," + eid + ":" + time_value;
     }
-    database_data.push_back(std::make_pair(database_key, record_value));
   }
 
+  database_data.push_back(std::make_pair(database_key, record_value));
   auto status = setDatabaseBatch(kEvents, database_data);
   if (!status.ok()) {
     LOG(ERROR) << "Could not put Event Records";
@@ -533,9 +525,9 @@ void EventSubscriberPlugin::get(RowYield& yield,
 
   if (FLAGS_events_optimize && !records.empty()) {
     // If records were returned save the ordered-last as the optimization EID.
-    unsigned long int eidr = 0;
-    if (safeStrtoul(records.back().first, 10, eidr)) {
-      optimize_eid_ = static_cast<size_t>(eidr);
+    auto const eidr_exp = tryTo<unsigned long int>(records.back().first, 10);
+    if (eidr_exp.isValue()) {
+      optimize_eid_ = static_cast<size_t>(eidr_exp.get());
     }
   }
 
@@ -618,8 +610,8 @@ Status EventSubscriberPlugin::addBatch(std::vector<Row>& row_list,
     // Store the event data in the batch
     database_data.push_back(std::make_pair(
         "data." + dbNamespace() + "." + row["eid"], serialized_row));
-    event_id_list.push_back(std::move(row["eid"]));
 
+    event_id_list.push_back(std::move(row["eid"]));
     event_count_++;
   }
 
@@ -803,7 +795,7 @@ Status EventFactory::run(const std::string& type_id) {
     // This is a 'default' cool-off implemented in InterruptableRunnable.
     // If a publisher fails to perform some sort of interruption point, this
     // prevents the thread from thrashing through exiting checks.
-    publisher->pauseMilli(200);
+    publisher->pause(std::chrono::milliseconds(200));
   }
   if (!status.ok()) {
     // The runloop status is not reflective of the event type's.

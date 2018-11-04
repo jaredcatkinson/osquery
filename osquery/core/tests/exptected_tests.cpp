@@ -29,6 +29,7 @@ enum class TestError {
 GTEST_TEST(ExpectedTest, success_contructor_initialization) {
   Expected<std::string, TestError> value = std::string("Test");
   EXPECT_TRUE(value);
+  EXPECT_TRUE(value.isValue());
   EXPECT_FALSE(value.isError());
   EXPECT_EQ(value.get(), "Test");
 }
@@ -37,6 +38,7 @@ GTEST_TEST(ExpectedTest, failure_error_contructor_initialization) {
   Expected<std::string, TestError> error =
       Error<TestError>(TestError::Some, "Please try again");
   EXPECT_FALSE(error);
+  EXPECT_FALSE(error.isValue());
   EXPECT_TRUE(error.isError());
   EXPECT_EQ(error.getErrorCode(), TestError::Some);
 }
@@ -170,13 +172,33 @@ GTEST_TEST(ExpectedTest, error_handling_example) {
   }
 }
 
-GTEST_TEST(ExpectedTest, error_was_not_checked) {
+GTEST_TEST(ExpectedTest, expected_was_not_checked_before_destruction_failure) {
   auto action = []() { auto expected = ExpectedSuccess<TestError>{Success()}; };
 #ifndef NDEBUG
-  ASSERT_DEATH(action(), "Error was not checked");
+  ASSERT_DEATH(action(), "Expected was not checked before destruction");
 #else
   boost::ignore_unused(action);
 #endif
+}
+
+GTEST_TEST(ExpectedTest, expected_was_not_checked_before_assigning_failure) {
+  auto action = []() {
+    auto expected = ExpectedSuccess<TestError>{Success()};
+    expected = ExpectedSuccess<TestError>{Success()};
+    expected.isValue();
+  };
+#ifndef NDEBUG
+  ASSERT_DEATH(action(), "Expected was not checked before assigning");
+#else
+  boost::ignore_unused(action);
+#endif
+}
+
+GTEST_TEST(ExpectedTest, expected_move_is_safe) {
+  auto expected = ExpectedSuccess<TestError>{Success()};
+  expected.isValue();
+  expected = ExpectedSuccess<TestError>{Success()};
+  expected.isValue();
 }
 
 GTEST_TEST(ExpectedTest, get_value_from_expected_with_error) {
@@ -221,16 +243,29 @@ GTEST_TEST(ExpectedTest, take_value_from_expected_with_error) {
 #endif
 }
 
-GTEST_TEST(ExpectedTest, value__getOr) {
-  const auto expectedValue = Expected<int, TestError>(225);
-  EXPECT_EQ(expectedValue.getOr(29), 225);
-  EXPECT_EQ(expectedValue.getOr(-29), 225);
+GTEST_TEST(ExpectedTest, get_error_from_expected_with_value) {
+  auto action = []() {
+    auto expected = Expected<int, TestError>(228);
+    const auto& error = expected.getError();
+    boost::ignore_unused(error);
+  };
+#ifndef NDEBUG
+  ASSERT_DEATH(action(), "Do not try to get error from Expected with value");
+#else
+  boost::ignore_unused(action);
+#endif
 }
 
-GTEST_TEST(ExpectedTest, error__getOr) {
-  const auto err = Expected<int, TestError>(TestError::Semantic, "message");
-  EXPECT_EQ(err.getOr(37), 37);
-  EXPECT_EQ(err.getOr(-59), -59);
+GTEST_TEST(ExpectedTest, take_error_from_expected_with_value) {
+  auto action = []() {
+    auto expected = Expected<int, TestError>(228);
+    return expected.takeError();
+  };
+#ifndef NDEBUG
+  ASSERT_DEATH(action(), "Do not try to get error from Expected with value");
+#else
+  boost::ignore_unused(action);
+#endif
 }
 
 GTEST_TEST(ExpectedTest, value__takeOr) {
@@ -263,6 +298,22 @@ GTEST_TEST(ExpectedTest, error__takeOr_with_user_defined_class) {
   };
   EXPECT_EQ(callable().takeOr(SomeTestClass("427 BC", "347 BC")).text,
             "427 BC - 347 BC");
+}
+
+GTEST_TEST(ExpectedTest, value_takeOr_with_rvalue_as_an_argument) {
+  auto value = int{312};
+  auto callable = []() -> Expected<int, TestError> { return 306; };
+  value = callable().takeOr(value);
+  EXPECT_EQ(value, 306);
+}
+
+GTEST_TEST(ExpectedTest, error_takeOr_with_rvalue_as_an_argument) {
+  auto value = int{312};
+  auto callable = []() -> Expected<int, TestError> {
+    return createError(TestError::Logical, "error message");
+  };
+  value = callable().takeOr(value);
+  EXPECT_EQ(value, 312);
 }
 
 } // namespace osquery

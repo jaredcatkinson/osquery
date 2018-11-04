@@ -16,6 +16,7 @@
 #include <osquery/logger.h>
 #include <osquery/registry.h>
 
+#include "osquery/core/conversions.h"
 #include "osquery/core/flagalias.h"
 #include "osquery/core/json.h"
 
@@ -31,7 +32,7 @@ CLI_FLAG(bool, database_dump, false, "Dump the contents of the backing store");
 
 CLI_FLAG(string,
          database_path,
-         OSQUERY_DB_HOME "/osquery.db",
+         OSQUERY_DB_HOME "osquery.db",
          "If using a disk-based backing store, specify a path");
 FLAG_ALIAS(std::string, db_path, database_path);
 
@@ -47,7 +48,7 @@ const std::string kLogs = "logs";
 const std::string kDbEpochSuffix = "epoch";
 const std::string kDbCounterSuffix = "counter";
 
-const std::string kDatabaseResultsVersion = "1";
+const std::string kDbVersionKey = "results_version";
 
 const std::vector<std::string> kDomains = {
     kPersistentSettings, kQueries, kEvents, kLogs, kCarves};
@@ -254,7 +255,7 @@ Status sendPutBatchDatabaseRequest(const std::string& domain,
 Status sendPutDatabaseRequest(const std::string& domain,
                               const DatabaseStringValueList& data) {
   const auto& key = data[0].first;
-  const auto& value = data[1].second;
+  const auto& value = data[0].second;
 
   PluginRequest request = {
       {"action", "put"}, {"domain", domain}, {"key", key}, {"value", value}};
@@ -326,7 +327,7 @@ Status setDatabaseBatch(const std::string& domain,
   // External registries (extensions) do not have databases active.
   // It is not possible to use an extension-based database.
   if (RegistryFactory::get().external()) {
-    if (data.size() >= 1) {
+    if (data.size() > 1) {
       return sendPutBatchDatabaseRequest(domain, data);
     } else {
       return sendPutDatabaseRequest(domain, data);
@@ -514,22 +515,113 @@ static Status migrateV0V1(void) {
   return Status();
 }
 
-Status upgradeDatabase() {
-  std::string db_results_version{""};
-  getDatabaseValue(kPersistentSettings, "results_version", db_results_version);
+static Status migrateV1V2(void) {
+  std::vector<std::string> keys;
+  const std::string audit_str(".audit.");
 
-  if (db_results_version == kDatabaseResultsVersion) {
-    return Status();
-  }
-
-  auto s = migrateV0V1();
+  Status s = scanDatabaseKeys(kEvents, keys);
   if (!s.ok()) {
-    LOG(WARNING) << "Failed to migrate V0 to V1: " << s.what();
-    return Status(1, "DB migration failed");
+    return Status::failure(
+        1, "Failed to scan event keys from database: " + s.what());
   }
 
-  setDatabaseValue(
-      kPersistentSettings, "results_version", kDatabaseResultsVersion);
+  for (const auto& key : keys) {
+    const auto pos = key.find(audit_str);
+    if (pos != std::string::npos) {
+      std::string value;
+      std::string new_key = key;
+      new_key.replace(pos, audit_str.length(), ".auditeventpublisher.");
+
+      s = getDatabaseValue(kEvents, key, value);
+      if (!s.ok()) {
+        LOG(ERROR) << "Failed to read value for key '" << key
+                   << "'. Key will be kept but won't be migrated!";
+        continue;
+      }
+
+      s = setDatabaseValue(kEvents, new_key, value);
+      if (!s.ok()) {
+        LOG(ERROR) << "Failed to set value for key '" << new_key
+                   << "' migrated from '" << key
+                   << "'. Original key will be kept but won't be migrated!";
+        continue;
+      }
+
+      s = deleteDatabaseValue(kEvents, key);
+      if (!s.ok()) {
+        LOG(WARNING) << "Failed to delete key '" << key
+                     << "' after migration to new key '" << new_key
+                     << "'. Original key will be kept but data was migrated!";
+      }
+    }
+  }
+
+  return Status::success();
+}
+
+Status upgradeDatabase(int to_version) {
+  LOG(INFO) << "Checking database version for migration";
+
+  std::string value;
+  Status st = getDatabaseValue(kPersistentSettings, kDbVersionKey, value);
+
+  int db_version = 0;
+  /* Since there isn't a reliable way to determined what happen when the read
+   * fails we just assume the key doesn't exist which indicates database
+   * version 0.
+   */
+  if (st.ok()) {
+    auto ret = tryTo<int>(value);
+    if (ret.isError()) {
+      LOG(ERROR) << "Invalid value '" << value << "'for " << kDbVersionKey
+                 << " key. Database is corrupted.";
+      return Status(1, "Invalid value for database version.");
+    } else {
+      db_version = ret.get();
+    }
+  }
+
+  while (db_version != to_version) {
+    Status migrate_status;
+
+    LOG(INFO) << "Performing migration: " << db_version << " -> "
+              << (db_version + 1);
+
+    switch (db_version) {
+    case 0:
+      migrate_status = migrateV0V1();
+      break;
+
+    case 1:
+      migrate_status = migrateV1V2();
+      break;
+
+    default:
+      LOG(ERROR) << "Logic error: the migration code is broken!";
+      migrate_status = Status(1);
+      break;
+    }
+
+    if (!migrate_status.ok()) {
+      return Status(1, "Database migration failed.");
+    }
+
+    st = setDatabaseValue(
+        kPersistentSettings, kDbVersionKey, std::to_string(db_version + 1));
+    if (!st.ok()) {
+      LOG(ERROR) << "Failed to set new database version after migration. "
+                 << "The DB was correctly migrated from version " << db_version
+                 << " to version " << (db_version + 1)
+                 << " but persisting the new version failed.";
+      return Status(1, "Database migration failed.");
+    }
+
+    LOG(INFO) << "Migration " << db_version << " -> " << (db_version + 1)
+              << " successfully completed!";
+
+    db_version++;
+  }
+
   return Status();
 }
 } // namespace osquery

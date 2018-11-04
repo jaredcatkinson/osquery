@@ -213,13 +213,14 @@ if(POSIX)
   endif()
 elseif(WINDOWS)
   add_compile_options(
-    /EHsc
+    /EHs
     /W3
     /guard:cf
   )
   add_definitions(
     -DWIN32_LEAN_AND_MEAN
     -DBOOST_ALL_NO_LIB
+    -DAWS_DISABLE_DEPRECATION
   )
 endif()
 

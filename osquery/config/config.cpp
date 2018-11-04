@@ -9,6 +9,7 @@
  */
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <string>
@@ -22,6 +23,7 @@
 #include <osquery/database.h>
 #include <osquery/events.h>
 #include <osquery/flags.h>
+#include <osquery/killswitch.h>
 #include <osquery/logger.h>
 #include <osquery/packs.h>
 #include <osquery/registry.h>
@@ -29,10 +31,19 @@
 
 #include "osquery/core/conversions.h"
 #include "osquery/core/flagalias.h"
+#include "osquery/core/hashing.h"
 
 namespace rj = rapidjson;
 
 namespace osquery {
+namespace {
+/// Prefix to persist config data
+const std::string kConfigPersistencePrefix{"config_persistence."};
+
+using ConfigMap = std::map<std::string, std::string>;
+
+std::atomic<bool> is_first_time_refresh(true);
+}; // namespace
 
 /**
  * @brief Config plugin registry.
@@ -73,6 +84,12 @@ CLI_FLAG(uint64,
          config_accelerated_refresh,
          300,
          "Interval to wait if reading a configuration fails");
+
+CLI_FLAG(bool,
+         config_enable_backup,
+         false,
+         "Backup config and use it when refresh fails");
+
 FLAG_ALIAS(google::uint64,
            config_tls_accelerated_refresh,
            config_accelerated_refresh);
@@ -96,6 +113,7 @@ std::atomic<size_t> kStartTime;
 // The config may be accessed and updated asynchronously; use mutexes.
 Mutex config_hash_mutex_;
 Mutex config_refresh_mutex_;
+Mutex config_backup_mutex_;
 
 /// Several config methods require enumeration via predicate lambdas.
 RecursiveMutex config_schedule_mutex_;
@@ -249,8 +267,7 @@ class ConfigRefreshRunner : public InternalRunnable {
 
  private:
   /// The current refresh rate in seconds.
-  std::atomic<size_t> refresh_{0};
-  std::atomic<size_t> mod_{1000};
+  std::atomic<size_t> refresh_sec_{0};
 
  private:
   friend class Config;
@@ -268,8 +285,8 @@ void restoreScheduleBlacklist(std::map<std::string, size_t>& blacklist) {
   size_t current_time = getUnixTime();
   for (size_t i = 0; i < blacklist_pairs.size() / 2; i++) {
     // Fill in a mapping of query name to time the blacklist expires.
-    long long expire = 0;
-    safeStrtoll(blacklist_pairs[(i * 2) + 1], 10, expire);
+    auto expire =
+        tryTo<long long>(blacklist_pairs[(i * 2) + 1], 10).takeOr(0ll);
     if (expire > 0 && current_time < (size_t)expire) {
       blacklist[blacklist_pairs[(i * 2)]] = (size_t)expire;
     }
@@ -454,6 +471,19 @@ Status Config::refresh() {
     }
 
     loaded_ = true;
+    if (Killswitch::get().isConfigBackupEnabled()) {
+      if (FLAGS_config_enable_backup && is_first_time_refresh.exchange(false)) {
+        const auto result = restoreConfigBackup();
+        if (!result) {
+          return Status::failure(result.getError().getFullMessageRecursive());
+        } else {
+          update(*result);
+        }
+      }
+    } else {
+      LOG(INFO) << "Config backup is disabled by the killswitch";
+    }
+
     return status;
   } else if (getRefresh() != FLAGS_config_refresh) {
     VLOG(1) << "Normal configuration delay restored";
@@ -478,19 +508,17 @@ Status Config::refresh() {
     status = update(response[0]);
   }
 
+  is_first_time_refresh = false;
   loaded_ = true;
   return status;
 }
 
-void Config::setRefresh(size_t refresh, size_t mod) {
-  refresh_runner_->refresh_ = refresh;
-  if (mod > 0) {
-    refresh_runner_->mod_ = mod;
-  }
+void Config::setRefresh(size_t refresh_sec) {
+  refresh_runner_->refresh_sec_ = refresh_sec;
 }
 
 size_t Config::getRefresh() const {
-  return refresh_runner_->refresh_;
+  return refresh_runner_->refresh_sec_;
 }
 
 Status Config::load() {
@@ -531,6 +559,50 @@ void stripConfigComments(std::string& json) {
     sink += line + '\n';
   }
   json = sink;
+}
+
+Expected<ConfigMap, Config::RestoreConfigError> Config::restoreConfigBackup() {
+  LOG(INFO) << "Restoring backed up config from the database";
+  std::vector<std::string> keys;
+  ConfigMap config;
+
+  WriteLock lock(config_backup_mutex_);
+  scanDatabaseKeys(kPersistentSettings, keys, kConfigPersistencePrefix);
+
+  for (const auto& key : keys) {
+    std::string value;
+    Status status = getDatabaseValue(kPersistentSettings, key, value);
+    if (!status.ok()) {
+      LOG(ERROR)
+          << "restoreConfigBackup database failed to retrieve config for key "
+          << key;
+      return createError(Config::RestoreConfigError::DatabaseError,
+                         "Could not retrieve value for the key: " + key);
+    }
+    config[key.substr(kConfigPersistencePrefix.length())] = std::move(value);
+  }
+
+  return config;
+}
+
+void Config::backupConfig(const ConfigMap& config) {
+  LOG(INFO) << "BackupConfig started";
+  std::vector<std::string> keys;
+
+  WriteLock lock(config_backup_mutex_);
+  scanDatabaseKeys(kPersistentSettings, keys, kConfigPersistencePrefix);
+  for (const auto& key : keys) {
+    if (config.find(key.substr(kConfigPersistencePrefix.length())) ==
+        config.end()) {
+      deleteDatabaseValue(kPersistentSettings, key);
+    }
+  }
+
+  for (const auto& source : config) {
+    setDatabaseValue(kPersistentSettings,
+                     kConfigPersistencePrefix + source.first,
+                     source.second);
+  }
 }
 
 Status Config::updateSource(const std::string& source,
@@ -662,7 +734,7 @@ void Config::applyParsers(const std::string& source,
   }
 }
 
-Status Config::update(const std::map<std::string, std::string>& config) {
+Status Config::update(const ConfigMap& config) {
   // A config plugin may call update from an extension. This will update
   // the config instance within the extension process and the update must be
   // reflected in the core.
@@ -699,7 +771,8 @@ Status Config::update(const std::map<std::string, std::string>& config) {
     }
 
     if (!status.ok()) {
-      // The content was not parsed correctly.
+      LOG(ERROR) << "updateSource failed to parse config, of source: "
+                 << source.first << " and content: " << source.second;
       return status;
     }
     // If a source was updated and the content has changed, then the registry
@@ -734,6 +807,10 @@ Status Config::update(const std::map<std::string, std::string>& config) {
         plugin->configure();
       }
     }
+  }
+
+  if (FLAGS_config_enable_backup) {
+    backupConfig(config);
   }
 
   return Status(0, "OK");
@@ -803,6 +880,7 @@ void Config::reset() {
   std::map<std::string, std::string>().swap(hash_);
   valid_ = false;
   loaded_ = false;
+  is_first_time_refresh = true;
 
   refresh_runner_ = std::make_shared<ConfigRefreshRunner>();
   started_thread_ = false;
@@ -901,7 +979,9 @@ void Config::getPerformanceStats(
 }
 
 bool Config::hashSource(const std::string& source, const std::string& content) {
-  auto new_hash = getBufferSHA1(content.c_str(), content.size());
+  Hash hash(HASH_TYPE_SHA1);
+  hash.update(content.c_str(), content.size());
+  auto new_hash = hash.digest();
 
   WriteLock wlock(config_hash_mutex_);
   if (hash_[source] == new_hash) {
@@ -927,7 +1007,10 @@ Status Config::genHash(std::string& hash) const {
   for (const auto& it : hash_) {
     add(it.second);
   }
-  hash = getBufferSHA1(buffer.data(), buffer.size());
+
+  Hash new_hash(HASH_TYPE_SHA1);
+  new_hash.update(buffer.data(), buffer.size());
+  hash = new_hash.digest();
 
   return Status(0, "OK");
 }
@@ -1026,7 +1109,7 @@ void ConfigRefreshRunner::start() {
   while (!interrupted()) {
     // Cool off and time wait the configured period.
     // Apply this interruption initially as at t=0 the config was read.
-    pauseMilli(refresh_ * mod_);
+    pause(std::chrono::seconds(refresh_sec_));
     // Since the pause occurs before the logic, we need to check for an
     // interruption request.
     if (interrupted()) {
